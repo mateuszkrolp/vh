@@ -1,11 +1,3 @@
-"""
-Vinted.pl hunter — pobiera nowe oferty dla zadanych fraz,
-zapisuje surowy JSON do data/latest.json i data/history/<date>.json.
-
-Nie wysyła maila, nie filtruje subiektywnie, nie ocenia perełek —
-to robi Claude w rozmowie na podstawie JSON-a.
-"""
-
 from __future__ import annotations
 
 import json
@@ -18,7 +10,6 @@ from typing import Any
 
 from pyVinted import Vinted
 
-# ── Konfiguracja ─────────────────────────────────────────────────────────────
 
 QUERIES: list[str] = [
     "zabawki drewniane",
@@ -27,13 +18,13 @@ QUERIES: list[str] = [
     "klocki drewniane",
 ]
 
-LOOKBACK_HOURS = 48          # zapas — Claude odfiltruje dokładnie na 12h
+LOOKBACK_HOURS = 48
 PER_PAGE = 96
 MAX_PAGES = 3
 BASE_URL = "https://www.vinted.pl/catalog"
-COUNTRY_ID_PL = 180          # Vinted country id for Poland
-PRICE_TO_PLN = 80            # server-side prefilter (Claude dotnie niżej)
-HISTORY_KEEP_HOURS = 72      # ile historii zostawiamy w repo
+COUNTRY_ID_PL = 180
+PRICE_TO_PLN = 80
+HISTORY_KEEP_HOURS = 72
 SLEEP_BETWEEN_PAGES = 1.5
 SLEEP_BETWEEN_QUERIES = 2.5
 
@@ -65,8 +56,6 @@ class Offer:
 
 
 def build_search_url(query: str) -> str:
-    # country_ids[] jest listą — urlencode z doseq, żeby pyVinted.parseUrl
-    # rozpoznał klucz "country_ids[]" i przepuścił go do API
     params = [
         ("search_text", query),
         ("order", "newest_first"),
@@ -77,44 +66,28 @@ def build_search_url(query: str) -> str:
     return f"{BASE_URL}?{urllib.parse.urlencode(params)}"
 
 
-# Znaki których polski NIE używa — sygnał obcego języka.
-# Polski alfabet: a ą b c ć d e ę f g h i j k l ł m n ń o ó p r s ś t u w y z ź ż.
-# Wszystko inne co wygląda jak litera z diakrytykiem = obce.
 FOREIGN_CHARS = set(
     "áéíúýàèìòùâêîôûãõäöüÿåæøßřěůőűšžčťďňľĺŕșțăîģķļņūīėįųõõ"
     "ÁÉÍÚÝÄÖÜÅÆØŘĚŮŐŰŠŽČŤĎŇĽĹŔ"
 )
 
-# Obcojęzyczne słowa których polski nie ma; jeśli w tytule → drop.
-# Każdy wpis musi być >= 3 znaków, żeby nie łapać polskich rdzeni przypadkiem.
 FOREIGN_WORDS = (
-    # CZ/SK (bez diakrytyków — z diakrytykami łapie FOREIGN_CHARS)
     "drevene", "drevena", "dreveny", "hracka", "hracky", "kostky", "kocky",
     "detske", "vkladacka", "skluzavka", "kulickov", "domcek",
-    # HU
     "jatek", "keszlet", "mese ", "vandor", " kis ",
-    # FI
     "puinen", "puiset", "palapel", "laatikko", "leikkiauto", "elaim", "nuppi",
-    # EE
     "manguasi", "iminap",
-    # LV
     " koka ", "koka.", " koks", " puzle",
-    # LT
     "medine", "medines", "medzio",
-    # RO
     " lemn", "jucari", "masin", "foto lemn",
-    # DE
     "holz", "spielzeug",
-    # DK/NO/SE
     "bondegard", "dukkeh", " pussel", " bitars", "sodt ",
 )
 
 
 def is_likely_polish(title: str) -> bool:
-    """Odrzuć ofertę jeśli tytuł ma obce znaki lub obce słowa.
-    To jest heurystyka — nie jest idealna, ale lepsza niż brak filtra."""
     if not title:
-        return True  # brak tytułu → nie odrzucamy prewencyjnie
+        return True
     if any(c in FOREIGN_CHARS for c in title):
         return False
     low = title.lower()
@@ -238,14 +211,13 @@ def scrape() -> list[Offer]:
 
 
 def prune_history(now: datetime) -> int:
-    """Usuń pliki historii starsze niż HISTORY_KEEP_HOURS. Zwraca liczbę usuniętych."""
     if not HISTORY.exists():
         return 0
     cutoff = now - timedelta(hours=HISTORY_KEEP_HOURS)
     removed = 0
     for f in HISTORY.glob("*.json"):
         try:
-            stem = f.stem  # "2026-04-15T22-32"
+            stem = f.stem
             dt = datetime.strptime(stem, "%Y-%m-%dT%H-%M").replace(tzinfo=timezone.utc)
         except ValueError:
             continue
@@ -271,8 +243,8 @@ def save(offers: list[Offer]) -> None:
     (HISTORY / f"{stamp}.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2))
     removed = prune_history(now)
     if removed:
-        print(f"  prune: usunięto {removed} starych plików historii")
-    print(f"\n✔ zapisano {len(offers)} ofert → {LATEST.relative_to(ROOT)}")
+        print(f"  prune: {removed}")
+    print(f"\n✔ {len(offers)} → {LATEST.relative_to(ROOT)}")
 
 
 if __name__ == "__main__":
