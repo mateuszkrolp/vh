@@ -1,1 +1,1 @@
-vinted-api-wrapper>=0.3.9
+pyVinted>=0.1.0

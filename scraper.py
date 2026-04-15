@@ -10,12 +10,13 @@ from __future__ import annotations
 
 import json
 import time
+import urllib.parse
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from vinted_api_wrapper import Vinted
+from pyVinted import Vinted
 
 # ── Konfiguracja ─────────────────────────────────────────────────────────────
 
@@ -29,9 +30,9 @@ QUERIES: list[str] = [
 LOOKBACK_HOURS = 48          # zapas — Claude odfiltruje dokładnie na 12h
 PER_PAGE = 96
 MAX_PAGES = 3
-DOMAIN = "pl"
-SLEEP_BETWEEN_PAGES = 1.0
-SLEEP_BETWEEN_QUERIES = 2.0
+BASE_URL = "https://www.vinted.pl/catalog"
+SLEEP_BETWEEN_PAGES = 1.5
+SLEEP_BETWEEN_QUERIES = 2.5
 
 ROOT = Path(__file__).parent
 DATA = ROOT / "data"
@@ -60,45 +61,69 @@ class Offer:
     extra: dict[str, Any] = field(default_factory=dict)
 
 
-def _safe(obj, *path, default=None):
-    cur = obj
-    for p in path:
+def build_search_url(query: str) -> str:
+    params = {
+        "search_text": query,
+        "order": "newest_first",
+        "currency": "PLN",
+    }
+    return f"{BASE_URL}?{urllib.parse.urlencode(params)}"
+
+
+def _dget(d: dict | None, *keys, default=None):
+    cur = d
+    for k in keys:
+        if not isinstance(cur, dict):
+            return default
+        cur = cur.get(k)
         if cur is None:
             return default
-        cur = getattr(cur, p, None) if not isinstance(cur, dict) else cur.get(p)
     return cur if cur is not None else default
 
 
 def to_offer(item, query: str, now_iso: str) -> Offer | None:
     try:
-        created_ts = getattr(item, "created_at_ts", None) or getattr(item, "created_at", None)
+        raw = getattr(item, "raw_data", None) or {}
+
+        created_ts = getattr(item, "raw_timestamp", None)
         if isinstance(created_ts, (int, float)):
-            created_iso = datetime.fromtimestamp(created_ts, tz=timezone.utc).isoformat()
+            created_iso = datetime.fromtimestamp(int(created_ts), tz=timezone.utc).isoformat()
         else:
-            created_iso = str(created_ts) if created_ts else now_iso
+            created_dt = getattr(item, "created_at_ts", None)
+            if isinstance(created_dt, datetime):
+                created_iso = created_dt.astimezone(timezone.utc).isoformat()
+            else:
+                created_iso = now_iso
 
-        price = getattr(item, "price", None)
-        amount = float(_safe(price, "amount", default=0) or 0)
-        currency = _safe(price, "currency_code", default="PLN") or "PLN"
+        price_raw = getattr(item, "price", None)
+        try:
+            amount = float(price_raw) if price_raw is not None else 0.0
+        except (TypeError, ValueError):
+            amount = float(_dget(raw, "price", "amount", default=0) or 0)
+        currency = (
+            getattr(item, "currency", None)
+            or _dget(raw, "price", "currency_code")
+            or "PLN"
+        )
 
-        user = getattr(item, "user", None)
-        desc = getattr(item, "description", "") or ""
+        user = _dget(raw, "user") or {}
+        desc = _dget(raw, "description", default="") or ""
         desc_excerpt = (desc[:500] + "…") if len(desc) > 500 else desc
 
         return Offer(
-            id=int(item.id),
+            id=int(getattr(item, "id", 0) or _dget(raw, "id", default=0)),
             query=query,
-            title=getattr(item, "title", "") or "",
+            title=getattr(item, "title", "") or _dget(raw, "title", default="") or "",
             price_amount=amount,
-            price_currency=currency,
-            brand=getattr(item, "brand_title", None),
-            status=getattr(item, "status", None),
-            size=getattr(item, "size_title", None),
-            url=getattr(item, "url", "") or "",
-            photo_url=_safe(getattr(item, "photo", None), "url"),
-            seller_login=_safe(user, "login"),
-            seller_feedback_count=_safe(user, "feedback_count"),
-            seller_country=_safe(user, "country_title_local"),
+            price_currency=str(currency),
+            brand=getattr(item, "brand_title", None) or _dget(raw, "brand_title"),
+            status=_dget(raw, "status"),
+            size=getattr(item, "size_title", None) or _dget(raw, "size_title"),
+            url=getattr(item, "url", "") or _dget(raw, "url", default="") or "",
+            photo_url=getattr(item, "photo", None) or _dget(raw, "photo", "url"),
+            seller_login=_dget(user, "login"),
+            seller_feedback_count=_dget(user, "feedback_count"),
+            seller_country=_dget(user, "country_title_local") or _dget(user, "country_title"),
             created_at=created_iso,
             fetched_at=now_iso,
             raw_description_excerpt=desc_excerpt,
@@ -109,17 +134,18 @@ def to_offer(item, query: str, now_iso: str) -> Offer | None:
 
 
 def scrape() -> list[Offer]:
-    vinted = Vinted(domain=DOMAIN)
+    vinted = Vinted()
     now = datetime.now(timezone.utc)
     now_iso = now.isoformat()
     cutoff = now - timedelta(hours=LOOKBACK_HOURS)
     by_id: dict[int, Offer] = {}
 
     for q in QUERIES:
-        print(f"\n→ '{q}'")
+        url = build_search_url(q)
+        print(f"\n→ '{q}'  ({url})")
         for page in range(1, MAX_PAGES + 1):
             try:
-                items = vinted.search(query=q, page=page, per_page=PER_PAGE, order="newest_first")
+                items = vinted.items.search(url, PER_PAGE, page)
             except Exception as e:
                 print(f"  [error page {page}] {e}")
                 break
