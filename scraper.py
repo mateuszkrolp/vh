@@ -77,6 +77,51 @@ def build_search_url(query: str) -> str:
     return f"{BASE_URL}?{urllib.parse.urlencode(params)}"
 
 
+# Znaki których polski NIE używa — sygnał obcego języka.
+# Polski alfabet: a ą b c ć d e ę f g h i j k l ł m n ń o ó p r s ś t u w y z ź ż.
+# Wszystko inne co wygląda jak litera z diakrytykiem = obce.
+FOREIGN_CHARS = set(
+    "áéíúàèìòùâêîôûãõäöüÿåæøßřěůőűšžčťďňľĺŕșțăîģķļņūīėįųõõÁÉÍÚÄÖÜÅÆØŘĚŮŐŰŠŽČ"
+)
+
+# Obcojęzyczne słowa których polski nie ma; jeśli w tytule → drop.
+# Każdy wpis musi być >= 3 znaków, żeby nie łapać polskich rdzeni przypadkiem.
+FOREIGN_WORDS = (
+    # CZ/SK (bez diakrytyków — z diakrytykami łapie FOREIGN_CHARS)
+    "drevene", "drevena", "hracka", "hracky", "kostky", "kocky", "detske",
+    "vkladacka", "skluzavka", "kulickov",
+    # HU
+    "jatek", "keszlet", "mese ", "vandor", " kis ",
+    # FI
+    "puinen", "puiset", "palapel", "laatikko", "leikkiauto", "elaim", "nuppi",
+    # EE
+    "manguasi", "iminap",
+    # LV
+    " koka ", "koka.", " koks", " puzle",
+    # LT
+    "medine", "medines", "medzio",
+    # RO
+    " lemn", "jucari", "masin", "foto lemn",
+    # DE
+    "holz", "spielzeug",
+    # DK/NO/SE
+    "bondegard", "dukkeh", " pussel", " bitars", "sodt ",
+)
+
+
+def is_likely_polish(title: str) -> bool:
+    """Odrzuć ofertę jeśli tytuł ma obce znaki lub obce słowa.
+    To jest heurystyka — nie jest idealna, ale lepsza niż brak filtra."""
+    if not title:
+        return True  # brak tytułu → nie odrzucamy prewencyjnie
+    if any(c in FOREIGN_CHARS for c in title):
+        return False
+    low = title.lower()
+    if any(w in low for w in FOREIGN_WORDS):
+        return False
+    return True
+
+
 def _dget(d: dict | None, *keys, default=None):
     cur = d
     for k in keys:
@@ -160,6 +205,7 @@ def scrape() -> list[Offer]:
                 break
 
             added = 0
+            skipped_foreign = 0
             stop = False
             for it in items:
                 off = to_offer(it, q, now_iso)
@@ -172,13 +218,16 @@ def scrape() -> list[Offer]:
                 if created < cutoff:
                     stop = True
                     continue
+                if not is_likely_polish(off.title):
+                    skipped_foreign += 1
+                    continue
                 if off.id not in by_id:
                     by_id[off.id] = off
                     added += 1
                 else:
                     by_id[off.id].extra.setdefault("also_matched_queries", []).append(q)
 
-            print(f"  page {page}: +{added} (łącznie {len(by_id)})")
+            print(f"  page {page}: +{added}, skip_foreign={skipped_foreign} (łącznie {len(by_id)})")
             time.sleep(SLEEP_BETWEEN_PAGES)
             if stop or len(items) < PER_PAGE:
                 break
