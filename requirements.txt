@@ -1,1 +1,2 @@
-pyVinted>=0.1.0
+pyVinted @ git+https://github.com/aime-risson/vinted-api-wrapper.git@main
+
