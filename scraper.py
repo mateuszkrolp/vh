@@ -81,15 +81,16 @@ def build_search_url(query: str) -> str:
 # Polski alfabet: a ą b c ć d e ę f g h i j k l ł m n ń o ó p r s ś t u w y z ź ż.
 # Wszystko inne co wygląda jak litera z diakrytykiem = obce.
 FOREIGN_CHARS = set(
-    "áéíúàèìòùâêîôûãõäöüÿåæøßřěůőűšžčťďňľĺŕșțăîģķļņūīėįųõõÁÉÍÚÄÖÜÅÆØŘĚŮŐŰŠŽČ"
+    "áéíúýàèìòùâêîôûãõäöüÿåæøßřěůőűšžčťďňľĺŕșțăîģķļņūīėįųõõ"
+    "ÁÉÍÚÝÄÖÜÅÆØŘĚŮŐŰŠŽČŤĎŇĽĹŔ"
 )
 
 # Obcojęzyczne słowa których polski nie ma; jeśli w tytule → drop.
 # Każdy wpis musi być >= 3 znaków, żeby nie łapać polskich rdzeni przypadkiem.
 FOREIGN_WORDS = (
     # CZ/SK (bez diakrytyków — z diakrytykami łapie FOREIGN_CHARS)
-    "drevene", "drevena", "hracka", "hracky", "kostky", "kocky", "detske",
-    "vkladacka", "skluzavka", "kulickov",
+    "drevene", "drevena", "dreveny", "hracka", "hracky", "kostky", "kocky",
+    "detske", "vkladacka", "skluzavka", "kulickov", "domcek",
     # HU
     "jatek", "keszlet", "mese ", "vandor", " kis ",
     # FI
