@@ -31,6 +31,9 @@ LOOKBACK_HOURS = 48          # zapas — Claude odfiltruje dokładnie na 12h
 PER_PAGE = 96
 MAX_PAGES = 3
 BASE_URL = "https://www.vinted.pl/catalog"
+COUNTRY_ID_PL = 180          # Vinted country id for Poland
+PRICE_TO_PLN = 80            # server-side prefilter (Claude dotnie niżej)
+HISTORY_KEEP_HOURS = 72      # ile historii zostawiamy w repo
 SLEEP_BETWEEN_PAGES = 1.5
 SLEEP_BETWEEN_QUERIES = 2.5
 
@@ -62,11 +65,15 @@ class Offer:
 
 
 def build_search_url(query: str) -> str:
-    params = {
-        "search_text": query,
-        "order": "newest_first",
-        "currency": "PLN",
-    }
+    # country_ids[] jest listą — urlencode z doseq, żeby pyVinted.parseUrl
+    # rozpoznał klucz "country_ids[]" i przepuścił go do API
+    params = [
+        ("search_text", query),
+        ("order", "newest_first"),
+        ("currency", "PLN"),
+        ("country_ids[]", str(COUNTRY_ID_PL)),
+        ("price_to", str(PRICE_TO_PLN)),
+    ]
     return f"{BASE_URL}?{urllib.parse.urlencode(params)}"
 
 
@@ -180,6 +187,24 @@ def scrape() -> list[Offer]:
     return sorted(by_id.values(), key=lambda o: o.created_at, reverse=True)
 
 
+def prune_history(now: datetime) -> int:
+    """Usuń pliki historii starsze niż HISTORY_KEEP_HOURS. Zwraca liczbę usuniętych."""
+    if not HISTORY.exists():
+        return 0
+    cutoff = now - timedelta(hours=HISTORY_KEEP_HOURS)
+    removed = 0
+    for f in HISTORY.glob("*.json"):
+        try:
+            stem = f.stem  # "2026-04-15T22-32"
+            dt = datetime.strptime(stem, "%Y-%m-%dT%H-%M").replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue
+        if dt < cutoff:
+            f.unlink()
+            removed += 1
+    return removed
+
+
 def save(offers: list[Offer]) -> None:
     DATA.mkdir(exist_ok=True)
     HISTORY.mkdir(exist_ok=True)
@@ -194,6 +219,9 @@ def save(offers: list[Offer]) -> None:
     LATEST.write_text(json.dumps(payload, ensure_ascii=False, indent=2))
     stamp = now.strftime("%Y-%m-%dT%H-%M")
     (HISTORY / f"{stamp}.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2))
+    removed = prune_history(now)
+    if removed:
+        print(f"  prune: usunięto {removed} starych plików historii")
     print(f"\n✔ zapisano {len(offers)} ofert → {LATEST.relative_to(ROOT)}")
 
 
